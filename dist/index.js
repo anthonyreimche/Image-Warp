@@ -1,4 +1,4 @@
-//#region ../Safelight Project/Image Warp for Safelight/src/runtime.ts
+//#region src/runtime.ts
 let _react = null;
 let _api = null;
 function initRuntime(api) {
@@ -20,7 +20,7 @@ function h(type, props, ...children) {
 	return R().createElement(type, props, ...children);
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/store.ts
+//#region src/store.ts
 let _store = null;
 function initStore() {
 	_store = api().stores.create((set) => ({
@@ -58,7 +58,7 @@ function clamp(v, lo, hi) {
 	return v < lo ? lo : v > hi ? hi : v;
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/warp-stage.ts
+//#region src/warp-stage.ts
 const STAGE_ID = "com.safelight.image-warp.warp";
 const FIELD_KEY = "warpField";
 const WARP_GLSL = `
@@ -94,7 +94,7 @@ const ENABLED_PARAM = `${STAGE_ID}.warpEnabled`;
 *  the sidecar JSON and participates in undo/redo for free. */
 const FIELD_REV_PARAM = `${STAGE_ID}.fieldRev`;
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/field.ts
+//#region src/field.ts
 const N = 256;
 const COUNT = N * N;
 const field = new Float32Array(COUNT * 4);
@@ -274,7 +274,7 @@ function clamp01(v) {
 const MAGIC = 1230459472;
 const HEADER = 12;
 function serialize(rev) {
-	const out = new Uint8Array(393228);
+	const out = /* @__PURE__ */ new Uint8Array(393228);
 	const dv = new DataView(out.buffer);
 	dv.setUint32(0, MAGIC, false);
 	out[4] = 1;
@@ -318,7 +318,7 @@ function parse(bytes) {
 		buf
 	};
 }
-const f32 = new Float32Array(1);
+const f32 = /* @__PURE__ */ new Float32Array(1);
 const i32 = new Int32Array(f32.buffer);
 function f32ToF16(val) {
 	f32[0] = val;
@@ -364,7 +364,7 @@ function f16ToF32(h) {
 	return f32[0];
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/persistence.ts
+//#region src/persistence.ts
 const MEMO_MAX = 64;
 const memo = /* @__PURE__ */ new Map();
 let revCounter = 0;
@@ -469,7 +469,7 @@ function subscribe() {
 	});
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/keys.ts
+//#region src/keys.ts
 const BRUSH = {
 	"brush.smaller": {
 		def: "[",
@@ -573,7 +573,7 @@ function initWarpKeys() {
 	return () => window.removeEventListener("keydown", handler, true);
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/Overlay.ts
+//#region src/Overlay.ts
 function WarpOverlay() {
 	const react = R();
 	const store = warpStore();
@@ -891,7 +891,7 @@ function centerPreview(rect, px, hardness) {
 	} }, ring(px * 2, false), hardness < .99 ? ring(px * 2 * hardness, true) : null);
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/icons.ts
+//#region src/icons.ts
 function svg(size, ...children) {
 	return h("svg", {
 		width: size,
@@ -942,7 +942,7 @@ function toolIcon(tool, size = 16) {
 	})));
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/Panel.ts
+//#region src/Panel.ts
 const TOOLS = [
 	{
 		id: "push",
@@ -985,24 +985,17 @@ const TOOLS = [
 		label: "Thaw"
 	}
 ];
-const BTN = (extra) => ({
-	height: "28px",
-	borderRadius: "5px",
-	border: "1px solid var(--color-border-subtle)",
-	background: "var(--color-surface-2, transparent)",
-	color: "var(--color-text-secondary)",
-	cursor: "pointer",
-	fontSize: "11px",
-	display: "flex",
-	alignItems: "center",
-	justifyContent: "center",
-	gap: "6px",
-	...extra
-});
 function WarpPanel() {
 	const react = R();
+	const a = api();
 	const store = warpStore();
-	const Slider = api().components.Slider;
+	const Slider = a.components.Slider;
+	if (!a.ui) return h("div", { style: {
+		padding: "10px",
+		fontSize: "11px",
+		color: "var(--color-text-muted)"
+	} }, "Update Safelight to use this panel.");
+	const { Button } = a.ui;
 	const warpActive = store((s) => s.warpActive);
 	const tool = store((s) => s.tool);
 	const size = store((s) => s.size);
@@ -1015,43 +1008,36 @@ function WarpPanel() {
 		flexDirection: "column",
 		gap: "8px",
 		padding: "8px"
-	} }, h("button", {
-		onClick: () => store.getState().setWarpActive(true),
-		style: BTN({
-			background: "var(--color-accent)",
-			borderColor: "var(--color-accent)",
-			color: "var(--color-on-accent, #fff)"
-		})
+	} }, h(Button, {
+		variant: "primary",
+		full: true,
+		onClick: () => store.getState().setWarpActive(true)
 	}, h("span", { style: {
 		fontSize: "14px",
 		lineHeight: 1
-	} }, "✎"), "Warp"), h("button", {
-		onClick: () => void clearWarp(),
-		style: BTN({})
+	} }, "✎"), "Warp"), h(Button, {
+		variant: "secondary",
+		full: true,
+		onClick: () => void clearWarp()
 	}, "Clear warp"));
 	const toolButton = (t) => {
 		const selected = tool === t.id;
-		return h("button", {
+		return h(Button, {
 			key: t.id,
-			onClick: () => store.getState().setTool(t.id),
+			variant: "secondary",
+			active: selected,
+			full: true,
 			title: t.label,
-			style: {
-				display: "flex",
-				flexDirection: "column",
-				alignItems: "center",
-				justifyContent: "center",
-				gap: "3px",
-				padding: "6px 2px",
-				borderRadius: "5px",
-				border: "1px solid",
-				borderColor: selected ? "var(--color-accent)" : "var(--color-border-subtle)",
-				background: selected ? "var(--color-accent)" : "var(--color-surface-2, transparent)",
-				color: selected ? "var(--color-on-accent, #fff)" : "var(--color-text-secondary)",
-				cursor: "pointer",
-				fontSize: "9.5px",
-				lineHeight: 1
-			}
-		}, toolIcon(t.id, 17), h("span", null, t.label));
+			onClick: () => store.getState().setTool(t.id)
+		}, h("span", { style: {
+			display: "flex",
+			flexDirection: "column",
+			alignItems: "center",
+			justifyContent: "center",
+			gap: "3px",
+			fontSize: "9.5px",
+			lineHeight: 1
+		} }, toolIcon(t.id, 17), h("span", null, t.label)));
 	};
 	const slider = (label, value, min, max, dflt, onChange) => react.createElement(Slider, {
 		label,
@@ -1083,13 +1069,14 @@ function WarpPanel() {
 		height: "1px",
 		background: "var(--color-border-subtle)",
 		margin: "2px 0"
-	} }), slider("Size", size, .02, .6, .14, (v) => store.getState().setSize(v)), slider("Density", density, 0, 1, .5, (v) => store.getState().setDensity(v)), slider("Pressure", pressure, 0, 1, 1, (v) => store.getState().setPressure(v)), slider("Rate", rate, 0, 1, .5, (v) => store.getState().setRate(v)), slider("Hardness", hardness, 0, 1, .5, (v) => store.getState().setHardness(v)), h("button", {
-		onClick: () => store.getState().setWarpActive(false),
-		style: BTN({ marginTop: "4px" })
-	}, "Done"));
+	} }), slider("Size", size, .02, .6, .14, (v) => store.getState().setSize(v)), slider("Density", density, 0, 1, .5, (v) => store.getState().setDensity(v)), slider("Pressure", pressure, 0, 1, 1, (v) => store.getState().setPressure(v)), slider("Rate", rate, 0, 1, .5, (v) => store.getState().setRate(v)), slider("Hardness", hardness, 0, 1, .5, (v) => store.getState().setHardness(v)), h("div", { style: { marginTop: "4px" } }, h(Button, {
+		variant: "secondary",
+		full: true,
+		onClick: () => store.getState().setWarpActive(false)
+	}, "Done")));
 }
 //#endregion
-//#region ../Safelight Project/Image Warp for Safelight/src/index.ts
+//#region src/index.ts
 const ID = "com.safelight.image-warp";
 const TOGGLE_ACTION = `${ID}.toggle`;
 let unsubscribe = null;

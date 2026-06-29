@@ -1,7 +1,8 @@
 // Develop panel. Collapsed (not warping) it shows just "Warp" (enter) and
 // "Clear warp". While warping it expands to the tool picker + brush sliders +
-// "Done" (Esc also finishes). Inline styles + CSS variables only (runtime
-// extensions aren't scanned by Tailwind).
+// "Done" (Esc also finishes). Generic controls come from the shared core UI kit
+// (api.ui); the tool grid keeps a custom 2-col layout (no grid primitive in the
+// kit) but uses kit Buttons for the cells.
 
 import { h, R, api } from "./runtime";
 import { warpStore, type WarpTool } from "./store";
@@ -21,25 +22,26 @@ const TOOLS: { id: WarpTool; label: string }[] = [
 	{ id: "thaw", label: "Thaw" },
 ];
 
-const BTN = (extra: Record<string, unknown>): Record<string, unknown> => ({
-	height: "28px",
-	borderRadius: "5px",
-	border: "1px solid var(--color-border-subtle)",
-	background: "var(--color-surface-2, transparent)",
-	color: "var(--color-text-secondary)",
-	cursor: "pointer",
-	fontSize: "11px",
-	display: "flex",
-	alignItems: "center",
-	justifyContent: "center",
-	gap: "6px",
-	...extra,
-});
-
 export function WarpPanel() {
 	const react = R();
+	const a = api();
 	const store = warpStore();
-	const Slider = api().components.Slider;
+	const Slider = a.components.Slider;
+
+	if (!a.ui)
+		return h(
+			"div",
+			{
+				style: {
+					padding: "10px",
+					fontSize: "11px",
+					color: "var(--color-text-muted)",
+				},
+			},
+			"Update Safelight to use this panel.",
+		);
+
+	const { Button } = a.ui;
 
 	const warpActive: boolean = store((s) => s.warpActive);
 	const tool: WarpTool = store((s) => s.tool);
@@ -62,22 +64,19 @@ export function WarpPanel() {
 				},
 			},
 			h(
-				"button",
+				Button,
 				{
+					variant: "primary",
+					full: true,
 					onClick: () => store.getState().setWarpActive(true),
-					style: BTN({
-						background: "var(--color-accent)",
-						borderColor: "var(--color-accent)",
-						color: "var(--color-on-accent, #fff)",
-					}),
 				},
 				// The mask brush's glyph, so the warp brush reads consistently.
 				h("span", { style: { fontSize: "14px", lineHeight: 1 } }, "✎"),
 				"Warp",
 			),
 			h(
-				"button",
-				{ onClick: () => void clearWarp(), style: BTN({}) },
+				Button,
+				{ variant: "secondary", full: true, onClick: () => void clearWarp() },
 				"Clear warp",
 			),
 		);
@@ -87,36 +86,31 @@ export function WarpPanel() {
 	const toolButton = (t: { id: WarpTool; label: string }) => {
 		const selected = tool === t.id;
 		return h(
-			"button",
+			Button,
 			{
 				key: t.id,
-				onClick: () => store.getState().setTool(t.id),
+				variant: "secondary",
+				active: selected,
+				full: true,
 				title: t.label,
-				style: {
-					display: "flex",
-					flexDirection: "column",
-					alignItems: "center",
-					justifyContent: "center",
-					gap: "3px",
-					padding: "6px 2px",
-					borderRadius: "5px",
-					border: "1px solid",
-					borderColor: selected
-						? "var(--color-accent)"
-						: "var(--color-border-subtle)",
-					background: selected
-						? "var(--color-accent)"
-						: "var(--color-surface-2, transparent)",
-					color: selected
-						? "var(--color-on-accent, #fff)"
-						: "var(--color-text-secondary)",
-					cursor: "pointer",
-					fontSize: "9.5px",
-					lineHeight: 1,
-				},
+				onClick: () => store.getState().setTool(t.id),
 			},
-			toolIcon(t.id, 17),
-			h("span", null, t.label),
+			h(
+				"span",
+				{
+					style: {
+						display: "flex",
+						flexDirection: "column",
+						alignItems: "center",
+						justifyContent: "center",
+						gap: "3px",
+						fontSize: "9.5px",
+						lineHeight: 1,
+					},
+				},
+				toolIcon(t.id, 17),
+				h("span", null, t.label),
+			),
 		);
 	};
 
@@ -199,12 +193,17 @@ export function WarpPanel() {
 		),
 
 		h(
-			"button",
-			{
-				onClick: () => store.getState().setWarpActive(false),
-				style: BTN({ marginTop: "4px" }),
-			},
-			"Done",
+			"div",
+			{ style: { marginTop: "4px" } },
+			h(
+				Button,
+				{
+					variant: "secondary",
+					full: true,
+					onClick: () => store.getState().setWarpActive(false),
+				},
+				"Done",
+			),
 		),
 	);
 }

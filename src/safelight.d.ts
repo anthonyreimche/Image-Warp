@@ -170,6 +170,11 @@ export interface ProcessingStageContribution {
 
 // ── API ──────────────────────────────────────────────────────────────────────
 
+// Shared core UI kit components are opaque React components; this file vendors
+// its own shapes and can't import React, so ComponentType is just `any`.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ComponentType = any;
+
 export interface SafelightAPI {
   version: 1;
   extensionId: string;
@@ -189,6 +194,23 @@ export interface SafelightAPI {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   components: Record<string, any>;
+  ui?: {
+    Button: ComponentType;
+    Select: ComponentType;
+    TextInput: ComponentType;
+    NumberInput: ComponentType;
+    TextArea: ComponentType;
+    Toggle: ComponentType;
+    SegmentedControl: ComponentType;
+    Field: ComponentType;
+    Section: ComponentType;
+    Card: ComponentType;
+    Badge: ComponentType;
+    ProgressBar: ComponentType;
+    Row: ComponentType;
+    Stack: ComponentType;
+    tokens: Record<string, string>;
+  };
   stores: {
     create<T>(initializer: StateCreator<T>): StoreApi<T>;
     useDevelopStore: StoreApi<DevelopStoreState>;
