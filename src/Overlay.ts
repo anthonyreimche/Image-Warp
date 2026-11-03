@@ -14,6 +14,19 @@ import { ENABLED_PARAM, FIELD_REV_PARAM, FIELD_SIZE } from "./warp-stage";
 import * as field from "./field";
 import { commit } from "./persistence";
 
+// Pointer position in the overlay's layout pixels, the space toImage and the
+// rings use: Preferences ▸ Interface scale zooms <body>, and under CSS zoom
+// clientX and getBoundingClientRect() are in zoomed visual pixels.
+export function frameLocalPoint(
+  el: Element | null,
+  clientX: number,
+  clientY: number,
+): { lx: number; ly: number } {
+  const r = el ? el.getBoundingClientRect() : { left: 0, top: 0 };
+  const z = api().stores.useSettings?.getState().uiScale || 1;
+  return { lx: (clientX - r.left) / z, ly: (clientY - r.top) / z };
+}
+
 export function WarpOverlay() {
   const react = R();
   const store = warpStore();
@@ -184,11 +197,8 @@ export function WarpOverlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gesture]);
 
-  const localFromEvent = (e: PointerEvent): { lx: number; ly: number } => {
-    const root = rootRef.current as HTMLElement | null;
-    const r = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
-    return { lx: e.clientX - r.left, ly: e.clientY - r.top };
-  };
+  const localFromEvent = (e: PointerEvent): { lx: number; ly: number } =>
+    frameLocalPoint(rootRef.current as HTMLElement | null, e.clientX, e.clientY);
 
   const sampleAt = (lx: number, ly: number) => {
     const p = toImage ? toImage(lx, ly) : { x: -1, y: -1 };

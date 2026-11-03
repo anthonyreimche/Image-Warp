@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "install-local": "node scripts/install.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --import ./test/resolve-ts.mjs --test test/overlay.test.mjs test/persistence.test.mjs"
   },
   "devDependencies": {
     "rolldown": "^1.1.3",

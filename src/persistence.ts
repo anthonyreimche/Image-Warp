@@ -3,7 +3,7 @@
 // The trick that keeps the core change tiny: the actual field bytes live in a
 // binary sidecar (api.develop.put/getPhotoData), but the only thing written into
 // the photo's paramBag is a monotonic REVISION TOKEN (fieldRev). Because paramBag
-// is snapshotted by commitEdit, restored by undo/redo, and serialised to the
+// is snapshotted by commitEdit, restored by undo/redo, and serialized to the
 // sidecar JSON, the token gives us persistence + full undo "for free" — we just
 // react to it.
 //
@@ -108,20 +108,30 @@ export function sync(): void {
   }
 
   // Not in memory — read the sidecar (only the current rev survives a reload).
+  // Until it lands the photo shows unwarped, not the previous photo's warp.
   appliedKey = key; // claim it now; a stale async result re-checks below
+  field.clear();
+  field.push();
+  const current = () => devStore().getState().photoId === photoId && currentRev() === rev;
   void api()
     .develop.getPhotoData("warpField")
     .then((bytes) => {
-      // Bail if the photo/rev moved on while we awaited disk.
-      if (devStore().getState().photoId !== photoId || currentRev() !== rev) return;
+      if (!current()) return;
       const parsed = bytes ? field.parse(bytes) : null;
       if (parsed && parsed.rev === rev) {
         memoSet(key, parsed.buf.slice());
         field.setFrom(parsed.buf);
-      } else {
-        field.clear();
+        field.push();
       }
-      field.push();
+    })
+    .catch((err: unknown) => {
+      console.error("[image-warp] couldn't read the photo's warp", err);
+      if (!current()) return;
+      void api().ui?.alertDialog?.({
+        title: "Image Warp",
+        message:
+          "Couldn't read the warp saved with this photo, so it's showing without it. A new warp stroke replaces the saved one.",
+      });
     });
 }
 

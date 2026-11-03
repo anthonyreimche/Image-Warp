@@ -132,7 +132,7 @@ export function stamp(o: StampOpts): void {
     const ry = gv - cv;
     for (let gx = gx0; gx <= gx1; gx++) {
       const gu = (gx + 0.5) / N;
-      const rx = (gu - cu) * aspect; // height-normalised
+      const rx = (gu - cu) * aspect; // height-normalized
       const dist = Math.sqrt(rx * rx + ry * ry) / rv;
       if (dist > 1) continue;
 
@@ -240,7 +240,7 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-// ── Serialisation (compact half-float sidecar) ───────────────────────────────
+// ── Serialization (compact half-float sidecar) ───────────────────────────────
 // Layout: 12-byte header + size·size·3 half-floats (du, dv, freeze).
 //   [0..3] magic "IWRP"  [4] version=1  [5] channels=3
 //   [6..7] size u16 LE   [8..11] rev u32 LE

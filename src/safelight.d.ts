@@ -39,6 +39,11 @@ export interface UIStoreState {
   activeModule: "library" | "develop";
 }
 
+export interface SettingsState {
+  /** Preferences ▸ Interface scale, applied as CSS zoom on <body>. */
+  uiScale: number;
+}
+
 // ── Develop-canvas overlay geometry ──────────────────────────────────────────
 
 export interface OverlayRect {
@@ -210,11 +215,14 @@ export interface SafelightAPI {
     Row: ComponentType;
     Stack: ComponentType;
     tokens: Record<string, string>;
+    alertDialog?(options: { title: string; message: string }): Promise<void>;
   };
   stores: {
     create<T>(initializer: StateCreator<T>): StoreApi<T>;
     useDevelopStore: StoreApi<DevelopStoreState>;
     useUIStore: StoreApi<UIStoreState>;
+    /** Missing on apps before the Interface scale setting. */
+    useSettings?: StoreApi<SettingsState>;
     [key: string]: unknown;
   };
   keybindings: { getBinding(actionId: string): string };
