@@ -1,7 +1,7 @@
 {
   "name": "safelight-image-warp",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Liquify-style interactive warp (push / twirl / pucker / bloat / freeze) extension for SafeLight.",
   "type": "module",
   "scripts": {

@@ -445,14 +445,24 @@ function sync() {
 		return;
 	}
 	appliedKey = key;
+	clear();
+	push();
+	const current = () => devStore().getState().photoId === photoId && currentRev() === rev;
 	api().develop.getPhotoData("warpField").then((bytes) => {
-		if (devStore().getState().photoId !== photoId || currentRev() !== rev) return;
+		if (!current()) return;
 		const parsed = bytes ? parse(bytes) : null;
 		if (parsed && parsed.rev === rev) {
 			memoSet(key, parsed.buf.slice());
 			setFrom(parsed.buf);
-		} else clear();
-		push();
+			push();
+		}
+	}).catch((err) => {
+		console.error("[image-warp] couldn't read the photo's warp", err);
+		if (!current()) return;
+		api().ui?.alertDialog?.({
+			title: "Image Warp",
+			message: "Couldn't read the warp saved with this photo, so it's showing without it. A new warp stroke replaces the saved one."
+		});
 	});
 }
 /** Subscribe to develop-store changes; resync whenever the photo or its
@@ -574,6 +584,17 @@ function initWarpKeys() {
 }
 //#endregion
 //#region src/Overlay.ts
+function frameLocalPoint(el, clientX, clientY) {
+	const r = el ? el.getBoundingClientRect() : {
+		left: 0,
+		top: 0
+	};
+	const z = api().stores.useSettings?.getState().uiScale || 1;
+	return {
+		lx: (clientX - r.left) / z,
+		ly: (clientY - r.top) / z
+	};
+}
 function WarpOverlay() {
 	const react = R();
 	const store = warpStore();
@@ -712,17 +733,7 @@ function WarpOverlay() {
 		}
 		updateRing(0, 0, false);
 	}, [gesture]);
-	const localFromEvent = (e) => {
-		const root = rootRef.current;
-		const r = root ? root.getBoundingClientRect() : {
-			left: 0,
-			top: 0
-		};
-		return {
-			lx: e.clientX - r.left,
-			ly: e.clientY - r.top
-		};
-	};
+	const localFromEvent = (e) => frameLocalPoint(rootRef.current, e.clientX, e.clientY);
 	const sampleAt = (lx, ly) => {
 		const p = toImage ? toImage(lx, ly) : {
 			x: -1,
