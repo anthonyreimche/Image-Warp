@@ -50,6 +50,12 @@ export function WarpPanel() {
 	const pressure: number = store((s) => s.pressure);
 	const rate: number = store((s) => s.rate);
 	const hardness: number = store((s) => s.hardness);
+	const held = a.develop.useCanvasToolHeld();
+
+	// Another tool took the canvas (crop, masks, heal): the warp finishes.
+	react.useEffect(() => {
+		if (warpActive && !held) store.getState().setWarpActive(false);
+	}, [warpActive, held]);
 
 	// ── Collapsed: just enter-warp + clear ──────────────────────────────────────
 	if (!warpActive) {

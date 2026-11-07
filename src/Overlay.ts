@@ -1,6 +1,6 @@
-// The interactive layer. Mounted into the click-through "develop-canvas-overlay"
-// slot, it covers the whole canvas; while the warp tool is armed it captures
-// pointer events, maps them to source-UV via api.develop's overlay helpers
+// The interactive layer: the canvas tool held while the warp is armed
+// (WARP_TOOL), so crop, masks and heal never take the canvas at the same time.
+// It covers the whole canvas, captures pointer events, maps them to source-UV via api.develop's overlay helpers
 // (getBoundingClientRect — never offsetX/Y, which break under Windows display
 // scaling), and stamps the active tool into the displacement field on a rAF loop
 // so a held or dragged brush flows smoothly. A custom brush ring tracks the
@@ -9,6 +9,8 @@
 // Inline styles + CSS variables (no Tailwind in runtime extensions).
 
 import { h, R, api } from "./runtime";
+import type { CanvasTool } from "./safelight";
+import { brushAction } from "./keys";
 import { warpStore } from "./store";
 import { ENABLED_PARAM, FIELD_REV_PARAM, FIELD_SIZE } from "./warp-stage";
 import * as field from "./field";
@@ -49,8 +51,6 @@ export function WarpOverlay() {
   };
 
   const dev = api().stores.useDevelopStore;
-  const cropping: boolean = dev((s) => s.cropping);
-  const activeTool: string = dev((s) => s.activeTool);
   const photoId: string | null = dev((s) => s.photoId);
   // Re-render (and repaint the freeze overlay) when the warp revision changes
   // via undo/redo/photo-load.
@@ -70,8 +70,7 @@ export function WarpOverlay() {
   const lastTime = react.useRef(0);
   const shown = react.useRef(false);
 
-  const visible =
-    warpActive && !cropping && activeTool === "none" && !!rect && !!photoId && !!toImage;
+  const visible = warpActive && !!rect && !!photoId && !!toImage;
 
   // Hide the native cursor while armed so only our brush ring shows. Released
   // while a pan/zoom gesture is held so ViewportImage's zoom/pan cursor surfaces.
@@ -390,3 +389,13 @@ function centerPreview(
     hardness < 0.99 ? ring(px * 2 * hardness, true) : null,
   );
 }
+
+/** The tool held while the warp is armed. Develop's brush shortcuts set the
+ *  brush; Escape finishes the warp, as the panel's Done does. */
+export const WARP_TOOL: CanvasTool = {
+  overlay: WarpOverlay,
+  zoomable: true,
+  onEscape: () => warpStore().getState().setWarpActive(false),
+  onAction: (action) => brushAction(action, true),
+  wants: (action) => brushAction(action, false),
+};

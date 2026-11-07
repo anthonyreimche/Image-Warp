@@ -28,8 +28,6 @@ export interface DevelopStoreState {
   photoId: string | null;
   params: DevelopParams;
   paramBag: Record<string, unknown>;
-  cropping: boolean;
-  activeTool: "none" | "mask" | "retouch" | "hsl-picker";
   setDynParam(key: string, value: unknown): void;
   setDynParams(patch: Record<string, unknown>): void;
   commitEdit(label: string): Promise<void>;
@@ -73,21 +71,6 @@ export interface DevelopOverlayState {
 }
 
 // ── Contributions ────────────────────────────────────────────────────────────
-
-export type SlotName =
-  | "library-toolbar"
-  | "library-subbar"
-  | "develop-toolbar"
-  | "develop-canvas-overlay"
-  | "develop-detail";
-
-export interface SlotContribution {
-  id: string;
-  slot: SlotName;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  component: (...args: any[]) => any;
-  order?: number;
-}
 
 export interface KeyActionContribution {
   id: string;
@@ -180,6 +163,21 @@ export interface ProcessingStageContribution {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ComponentType = any;
 
+/** An extension's on-image tool that takes the canvas over while it is held. */
+export interface CanvasTool {
+  /** Drawn over the image, inside the view. */
+  overlay: ComponentType;
+  /** Whether zoom and pan still reach the canvas under the overlay. */
+  zoomable?: boolean;
+  /** Escape was pressed: core lets the tool go after this. */
+  onEscape?(): void;
+  /** A shortcut's action (keybinding id) pressed while the tool is held:
+   *  whether the tool took it. */
+  onAction?(action: string): boolean;
+  /** Whether the tool would take `action` now, without acting. */
+  wants?(action: string): boolean;
+}
+
 export interface SafelightAPI {
   version: 1;
   extensionId: string;
@@ -189,7 +187,6 @@ export interface SafelightAPI {
   unregisterProcessingStage(id: string): void;
   setStageTexture(stageId: string, key: string, tex: StageTextureData | null): void;
   registerPanel(c: PanelContribution): void;
-  registerSlot(c: SlotContribution): void;
   registerKeybinding(c: KeyActionContribution): void;
   registerCursor(c: CursorContribution): void;
   settings: {
@@ -225,7 +222,6 @@ export interface SafelightAPI {
     useSettings?: StoreApi<SettingsState>;
     [key: string]: unknown;
   };
-  keybindings: { getBinding(actionId: string): string };
   develop: {
     useDevelopOverlay(): DevelopOverlayState;
     captureFrame(params: DevelopParams): Promise<ImageBitmap>;
@@ -235,6 +231,12 @@ export interface SafelightAPI {
     ): () => void;
     putPhotoData(key: string, data: Uint8Array | null): void;
     getPhotoData(key: string): Promise<Uint8Array | null>;
+    /** Hold the develop canvas with an on-image tool, or with null let go of
+     *  it. One extension holds it at a time: the last to set it. Needs
+     *  Safelight 3.2.0. */
+    setCanvasTool(tool: CanvasTool | null): void;
+    /** React hook: whether this extension holds the canvas tool. */
+    useCanvasToolHeld(): boolean;
   };
 }
 
