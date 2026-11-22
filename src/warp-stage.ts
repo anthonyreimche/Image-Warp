@@ -36,7 +36,7 @@ export function buildStage(): ProcessingStageContribution {
     priority: 50,
     uniforms: [{ key: "warpEnabled", glslType: "float", default: 0 }],
     textures: [
-      { key: FIELD_KEY, kind: "dynamic", width: FIELD_SIZE, height: FIELD_SIZE, format: "rgba16f" },
+      { key: FIELD_KEY, kind: "dynamic", width: FIELD_SIZE, height: FIELD_SIZE, format: "rgba16f", perPhoto: true },
     ],
     glsl: WARP_GLSL,
   };

@@ -19,6 +19,9 @@ import * as field from "./field";
 const MEMO_MAX = 64;
 const memo = new Map<string, Float32Array>(); // `${photoId}:${rev}` -> field copy
 let revCounter = 0;
+/** The revision each photo opened this session was last shown at (0: no warp),
+ *  which a frame of it draws when it is no longer open (fieldFor). */
+const shownRev = new Map<string, number>();
 
 /** Last (photoId, rev) we've reflected into the live field — guards the
  *  subscription from reloading a state we already show (e.g. our own commit). */
@@ -50,6 +53,7 @@ export async function commit(label: string): Promise<void> {
   const key = `${photoId}:${rev}`;
   memoSet(key, field.getField().slice());
   appliedKey = key;
+  shownRev.set(photoId, rev);
   api().develop.putPhotoData("warpField", field.serialize(rev));
   devStore().getState().setDynParams({
     [FIELD_REV_PARAM]: rev,
@@ -67,6 +71,7 @@ export async function clearWarp(): Promise<void> {
   const rev = ++revCounter;
   appliedKey = `${photoId}:${rev}`;
   memoSet(appliedKey, field.getField().slice());
+  shownRev.set(photoId, 0);
   api().develop.putPhotoData("warpField", null);
   devStore().getState().setDynParams({
     [FIELD_REV_PARAM]: rev,
@@ -88,6 +93,7 @@ export function sync(): void {
   const rev = currentRev();
   const key = `${photoId}:${rev}`;
   if (key === appliedKey) return;
+  shownRev.set(photoId, rev);
 
   if (rev === 0) {
     // No warp recorded for this photo.
@@ -133,6 +139,19 @@ export function sync(): void {
           "Couldn't read the warp saved with this photo, so it's showing without it. A new warp stroke replaces the saved one.",
       });
     });
+}
+
+/** The field a frame of photo `photoId` draws when it isn't the open one: the
+ *  revision it was last shown at this session, else the one saved with it;
+ *  null for none. Never the open photo's. */
+export async function fieldFor(photoId: string): Promise<Float32Array | null> {
+  const rev = shownRev.get(photoId);
+  if (rev === 0) return null;
+  const kept = rev === undefined ? undefined : memo.get(`${photoId}:${rev}`);
+  if (kept) return kept;
+  const bytes = await api().develop.getPhotoData("warpField", photoId);
+  const parsed = bytes ? field.parse(bytes) : null;
+  return parsed && (rev === undefined || parsed.rev === rev) ? parsed.buf : null;
 }
 
 /** Subscribe to develop-store changes; resync whenever the photo or its

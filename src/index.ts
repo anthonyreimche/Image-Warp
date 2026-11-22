@@ -8,9 +8,10 @@
 // (persistence.ts). The panel (Panel.ts) drives the tool + brush settings.
 //
 // Core provides only generic hooks: a scene-linear GPU stage with a dynamic
-// texture, the develop canvas tool with image-space pointer mapping, and
-// per-photo opaque blob storage (api.develop.put/getPhotoData). All warp logic
-// lives here.
+// texture of one photo's own (a per-photo variant, made on demand for photos
+// that aren't open), the develop canvas tool with image-space pointer mapping,
+// and per-photo opaque blob storage (api.develop.put/getPhotoData). All warp
+// logic lives here.
 
 import type { SafelightAPI } from "./safelight";
 import { initRuntime, api as theApi } from "./runtime";
@@ -39,8 +40,13 @@ export function activate(api: SafelightAPI): void {
   initRuntime(api);
   initStore();
 
-  // GPU warp stage + an initial empty field so the sampler is always valid.
+  // The warp stage, and each photo's field made on demand for frames of photos
+  // that aren't open (thumbnails, exports); the open photo's is pushed as edited.
   api.registerProcessingStage(buildStage());
+  api.setStageTextureProvider(STAGE_ID, FIELD_KEY, async (photoId) => {
+    const buf = await persistence.fieldFor(photoId);
+    return buf ? field.texture(buf) : null;
+  });
   field.clear();
   field.push();
 
@@ -84,7 +90,8 @@ export function deactivate(): void {
     unfollow = null;
     const api = theApi();
     api.develop.setCanvasTool(null);
-    api.setStageTexture(STAGE_ID, FIELD_KEY, null);
+    field.release();
+    api.setStageTextureProvider(STAGE_ID, FIELD_KEY, null);
     api.unregisterProcessingStage(STAGE_ID);
   } catch {
     /* api not initialised — nothing to tear down */

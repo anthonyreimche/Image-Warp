@@ -124,6 +124,8 @@ export interface UniformDeclaration {
 export interface TextureRequirement {
   key: string;
   kind: "lut" | "coverage" | "dynamic";
+  /** Each frame draws the variant filed under its photo's id. Needs 3.2.7. */
+  perPhoto?: boolean;
   width?: number;
   height?: number;
   format?: "rgba8" | "rgba16f" | "r8";
@@ -185,7 +187,13 @@ export interface SafelightAPI {
   react: any;
   registerProcessingStage(c: ProcessingStageContribution): void;
   unregisterProcessingStage(id: string): void;
-  setStageTexture(stageId: string, key: string, tex: StageTextureData | null): void;
+  setStageTexture(stageId: string, key: string, tex: StageTextureData | null, variant?: string): void;
+  setStageTextureProvider(
+    stageId: string,
+    key: string,
+    provide: ((variant: string, signal: AbortSignal) => Promise<StageTextureData | null>) | null,
+  ): void;
+  dropStageTextureVariants(stageId: string, key: string, variant?: string): void;
   registerPanel(c: PanelContribution): void;
   registerKeybinding(c: KeyActionContribution): void;
   registerCursor(c: CursorContribution): void;
@@ -230,7 +238,8 @@ export interface SafelightAPI {
       opts?: { priority?: number },
     ): () => void;
     putPhotoData(key: string, data: Uint8Array | null): void;
-    getPhotoData(key: string): Promise<Uint8Array | null>;
+    /** The open photo's data, or photo `photoId`'s (3.2.7). */
+    getPhotoData(key: string, photoId?: string): Promise<Uint8Array | null>;
     /** Hold the develop canvas with an on-image tool, or with null let go of
      *  it. One extension holds it at a time: the last to set it. Needs
      *  Safelight 3.2.0. */

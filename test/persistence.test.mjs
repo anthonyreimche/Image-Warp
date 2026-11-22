@@ -23,6 +23,7 @@ initRuntime({
   setStageTexture(_stage, _key, tex) {
     uploads.push(tex ? Array.from(tex.data).some((v) => v !== 0) : null);
   },
+  dropStageTextureVariants() {},
   develop: {
     putPhotoData() {},
     getPhotoData: () => readPhotoData(),

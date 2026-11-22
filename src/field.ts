@@ -5,11 +5,14 @@
 // from further brush edits (honoured here, ignored by the shader).
 //
 // A single field instance represents the CURRENTLY loaded photo's warp;
-// persistence.ts swaps it on photo switch / undo / load.
+// persistence.ts swaps it on photo switch / undo / load. It is supplied under
+// that photo's variant (the stage's field is a per-photo texture), so frames of
+// any other photo never draw it: theirs are made on demand (persistence.fieldFor).
 
 import { api } from "./runtime";
 import { STAGE_ID, FIELD_KEY, FIELD_SIZE } from "./warp-stage";
 import type { WarpTool } from "./store";
+import type { StageTextureData } from "./safelight";
 
 const N = FIELD_SIZE;
 const COUNT = N * N;
@@ -43,15 +46,31 @@ export function setFrom(buf: Float32Array): void {
   empty = false;
 }
 
-/** Upload the current field to the GPU (debounce/coalesce at the call site). */
+/** The photo whose variant holds the field as the brush edits it. */
+let shownFor: string | null = null;
+
+/** `buf` as the stage's field texture. */
+export function texture(buf: Float32Array): StageTextureData {
+  return { data: buf, width: N, height: N, format: "rgba16f", version: ++texVersion };
+}
+
+/** Upload the current field to the GPU (debounce/coalesce at the call site),
+ *  as the open photo's. Another photo opening lets the last one's go: it is
+ *  made again from what was kept for that photo when a frame needs it. */
 export function push(): void {
-  api().setStageTexture(STAGE_ID, FIELD_KEY, {
-    data: field,
-    width: N,
-    height: N,
-    format: "rgba16f",
-    version: ++texVersion,
-  });
+  const photoId = api().stores.useDevelopStore.getState().photoId;
+  if (shownFor !== null && shownFor !== photoId) release();
+  if (!photoId) return;
+  shownFor = photoId;
+  api().setStageTexture(STAGE_ID, FIELD_KEY, texture(field), photoId);
+}
+
+/** Let go of the field supplied for the photo last shown. */
+export function release(): void {
+  if (shownFor === null) return;
+  api().setStageTexture(STAGE_ID, FIELD_KEY, null, shownFor);
+  api().dropStageTextureVariants(STAGE_ID, FIELD_KEY, shownFor);
+  shownFor = null;
 }
 
 // ── Brush stamping ───────────────────────────────────────────────────────────

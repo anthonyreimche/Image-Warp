@@ -82,7 +82,8 @@ function buildStage() {
 			kind: "dynamic",
 			width: 256,
 			height: 256,
-			format: "rgba16f"
+			format: "rgba16f",
+			perPhoto: true
 		}],
 		glsl: WARP_GLSL
 	};
@@ -119,15 +120,34 @@ function setFrom(buf) {
 	}
 	empty = false;
 }
-/** Upload the current field to the GPU (debounce/coalesce at the call site). */
-function push() {
-	api().setStageTexture(STAGE_ID, FIELD_KEY, {
-		data: field,
+/** The photo whose variant holds the field as the brush edits it. */
+let shownFor = null;
+/** `buf` as the stage's field texture. */
+function texture(buf) {
+	return {
+		data: buf,
 		width: N,
 		height: N,
 		format: "rgba16f",
 		version: ++texVersion
-	});
+	};
+}
+/** Upload the current field to the GPU (debounce/coalesce at the call site),
+*  as the open photo's. Another photo opening lets the last one's go: it is
+*  made again from what was kept for that photo when a frame needs it. */
+function push() {
+	const photoId = api().stores.useDevelopStore.getState().photoId;
+	if (shownFor !== null && shownFor !== photoId) release();
+	if (!photoId) return;
+	shownFor = photoId;
+	api().setStageTexture(STAGE_ID, FIELD_KEY, texture(field), photoId);
+}
+/** Let go of the field supplied for the photo last shown. */
+function release() {
+	if (shownFor === null) return;
+	api().setStageTexture(STAGE_ID, FIELD_KEY, null, shownFor);
+	api().dropStageTextureVariants(STAGE_ID, FIELD_KEY, shownFor);
+	shownFor = null;
 }
 const TWIRL_K = 5;
 const PUCKER_K = 10;
@@ -368,6 +388,9 @@ function f16ToF32(h) {
 const MEMO_MAX = 64;
 const memo = /* @__PURE__ */ new Map();
 let revCounter = 0;
+/** The revision each photo opened this session was last shown at (0: no warp),
+*  which a frame of it draws when it is no longer open (fieldFor). */
+const shownRev = /* @__PURE__ */ new Map();
 /** Last (photoId, rev) we've reflected into the live field — guards the
 *  subscription from reloading a state we already show (e.g. our own commit). */
 let appliedKey = "";
@@ -394,6 +417,7 @@ async function commit(label) {
 	const key = `${photoId}:${rev}`;
 	memoSet(key, getField().slice());
 	appliedKey = key;
+	shownRev.set(photoId, rev);
 	api().develop.putPhotoData("warpField", serialize(rev));
 	devStore().getState().setDynParams({
 		[FIELD_REV_PARAM]: rev,
@@ -410,6 +434,7 @@ async function clearWarp() {
 	const rev = ++revCounter;
 	appliedKey = `${photoId}:${rev}`;
 	memoSet(appliedKey, getField().slice());
+	shownRev.set(photoId, 0);
 	api().develop.putPhotoData("warpField", null);
 	devStore().getState().setDynParams({
 		[FIELD_REV_PARAM]: rev,
@@ -430,6 +455,7 @@ function sync() {
 	const rev = currentRev();
 	const key = `${photoId}:${rev}`;
 	if (key === appliedKey) return;
+	shownRev.set(photoId, rev);
 	if (rev === 0) {
 		clear();
 		push();
@@ -465,6 +491,18 @@ function sync() {
 		});
 	});
 }
+/** The field a frame of photo `photoId` draws when it isn't the open one: the
+*  revision it was last shown at this session, else the one saved with it;
+*  null for none. Never the open photo's. */
+async function fieldFor(photoId) {
+	const rev = shownRev.get(photoId);
+	if (rev === 0) return null;
+	const kept = rev === void 0 ? void 0 : memo.get(`${photoId}:${rev}`);
+	if (kept) return kept;
+	const bytes = await api().develop.getPhotoData("warpField", photoId);
+	const parsed = bytes ? parse(bytes) : null;
+	return parsed && (rev === void 0 || parsed.rev === rev) ? parsed.buf : null;
+}
 /** Subscribe to develop-store changes; resync whenever the photo or its
 *  fieldRev token changes (photo switch, undo, redo, preset, reload). */
 function subscribe() {
@@ -480,107 +518,52 @@ function subscribe() {
 }
 //#endregion
 //#region src/keys.ts
-const BRUSH = {
+const STEPS = {
 	"brush.smaller": {
-		def: "[",
-		alts: [],
-		apply: () => step("size", -.02)
+		setting: "size",
+		delta: -.02
 	},
 	"brush.larger": {
-		def: "]",
-		alts: [],
-		apply: () => step("size", .02)
+		setting: "size",
+		delta: .02
 	},
 	"brush.featherDown": {
-		def: "Shift+[",
-		alts: ["Shift+{"],
-		apply: () => step("hardness", .05)
+		setting: "hardness",
+		delta: .05
 	},
 	"brush.featherUp": {
-		def: "Shift+]",
-		alts: ["Shift+}"],
-		apply: () => step("hardness", -.05)
+		setting: "hardness",
+		delta: -.05
 	},
 	"brush.opacityDown": {
-		def: ",",
-		alts: [],
-		apply: () => step("density", -.1)
+		setting: "density",
+		delta: -.1
 	},
 	"brush.opacityUp": {
-		def: ".",
-		alts: [],
-		apply: () => step("density", .1)
+		setting: "density",
+		delta: .1
 	},
 	"brush.flowDown": {
-		def: "Shift+,",
-		alts: ["Shift+<"],
-		apply: () => step("rate", -.1)
+		setting: "rate",
+		delta: -.1
 	},
 	"brush.flowUp": {
-		def: "Shift+.",
-		alts: ["Shift+>"],
-		apply: () => step("rate", .1)
+		setting: "rate",
+		delta: .1
 	}
 };
-function step(field, delta) {
-	const s = warpStore().getState();
-	if (field === "size") s.setSize(s.size + delta);
-	else if (field === "hardness") s.setHardness(s.hardness + delta);
-	else if (field === "density") s.setDensity(s.density + delta);
-	else s.setRate(s.rate + delta);
-}
-function comboFromEvent(e) {
-	const k = e.key;
-	if (k === "Control" || k === "Shift" || k === "Alt" || k === "Meta") return null;
-	const parts = [];
-	if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
-	if (e.shiftKey) parts.push("Shift");
-	if (e.altKey) parts.push("Alt");
-	parts.push(k.length === 1 ? k.toUpperCase() : k);
-	return parts.join("+");
-}
-function isEditableTarget(t) {
-	if (!(t instanceof HTMLElement)) return false;
-	if (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return true;
-	if (t instanceof HTMLInputElement) return ![
-		"range",
-		"checkbox",
-		"radio",
-		"button",
-		"color",
-		"file",
-		"submit",
-		"reset"
-	].includes(t.type);
-	return t.isContentEditable;
-}
-function inDevelop$1() {
-	const detached = new URLSearchParams(window.location.search).get("detached");
-	return api().stores.useUIStore.getState().activeModule === "develop" || detached === "develop";
-}
-function initWarpKeys() {
-	const handler = (e) => {
-		if (!warpStore().getState().warpActive || !inDevelop$1()) return;
-		if (e.key === "Escape") {
-			e.preventDefault();
-			e.stopImmediatePropagation();
-			warpStore().getState().setWarpActive(false);
-			return;
-		}
-		if (isEditableTarget(e.target)) return;
-		const combo = comboFromEvent(e);
-		if (!combo) return;
-		for (const [id, b] of Object.entries(BRUSH)) {
-			const bound = api().keybindings.getBinding(id);
-			if (combo === bound || bound === b.def && b.alts.includes(combo)) {
-				e.preventDefault();
-				b.apply(1);
-				return;
-			}
-		}
-	};
-	window.addEventListener("keydown", handler, true);
-	return () => window.removeEventListener("keydown", handler, true);
+/** Steps the warp brush by `action` (one of Develop's brush shortcuts) when
+*  `run`; whether it is one. The store's setters clamp. */
+function brushAction(action, run) {
+	const s = STEPS[action];
+	if (!s) return false;
+	if (!run) return true;
+	const st = warpStore().getState();
+	if (s.setting === "size") st.setSize(st.size + s.delta);
+	else if (s.setting === "hardness") st.setHardness(st.hardness + s.delta);
+	else if (s.setting === "density") st.setDensity(st.density + s.delta);
+	else st.setRate(st.rate + s.delta);
+	return true;
 }
 //#endregion
 //#region src/Overlay.ts
@@ -609,8 +592,6 @@ function WarpOverlay() {
 		setGesture(v);
 	};
 	const dev = api().stores.useDevelopStore;
-	const cropping = dev((s) => s.cropping);
-	const activeTool = dev((s) => s.activeTool);
 	const photoId = dev((s) => s.photoId);
 	const fieldRev = dev((s) => s.paramBag[FIELD_REV_PARAM]);
 	const { rect, imageRect, nonce, toImage, radiusToScreen } = api().develop.useDevelopOverlay();
@@ -633,7 +614,7 @@ function WarpOverlay() {
 	});
 	const lastTime = react.useRef(0);
 	const shown = react.useRef(false);
-	const visible = warpActive && !cropping && activeTool === "none" && !!rect && !!photoId && !!toImage;
+	const visible = warpActive && !!rect && !!photoId && !!toImage;
 	react.useEffect(() => {
 		if (!visible || gesture) return;
 		return api().develop.setCanvasCursor("none", { priority: 20 });
@@ -901,6 +882,15 @@ function centerPreview(rect, px, hardness) {
 		pointerEvents: "none"
 	} }, ring(px * 2, false), hardness < .99 ? ring(px * 2 * hardness, true) : null);
 }
+/** The tool held while the warp is armed. Develop's brush shortcuts set the
+*  brush; Escape finishes the warp, as the panel's Done does. */
+const WARP_TOOL = {
+	overlay: WarpOverlay,
+	zoomable: true,
+	onEscape: () => warpStore().getState().setWarpActive(false),
+	onAction: (action) => brushAction(action, true),
+	wants: (action) => brushAction(action, false)
+};
 //#endregion
 //#region src/icons.ts
 function svg(size, ...children) {
@@ -1014,6 +1004,10 @@ function WarpPanel() {
 	const pressure = store((s) => s.pressure);
 	const rate = store((s) => s.rate);
 	const hardness = store((s) => s.hardness);
+	const held = a.develop.useCanvasToolHeld();
+	react.useEffect(() => {
+		if (warpActive && !held) store.getState().setWarpActive(false);
+	}, [warpActive, held]);
 	if (!warpActive) return h("div", { style: {
 		display: "flex",
 		flexDirection: "column",
@@ -1091,7 +1085,7 @@ function WarpPanel() {
 const ID = "com.safelight.image-warp";
 const TOGGLE_ACTION = `${ID}.toggle`;
 let unsubscribe = null;
-let unbindKeys = null;
+let unfollow = null;
 function inDevelop(api) {
 	const detached = new URLSearchParams(window.location.search).get("detached");
 	return (api.stores.useUIStore.getState().activeModule === "develop" || detached === "develop") && !!api.stores.useDevelopStore.getState().photoId;
@@ -1100,11 +1094,17 @@ function activate(api) {
 	initRuntime(api);
 	initStore();
 	api.registerProcessingStage(buildStage());
+	api.setStageTextureProvider(STAGE_ID, FIELD_KEY, async (photoId) => {
+		const buf = await fieldFor(photoId);
+		return buf ? texture(buf) : null;
+	});
 	clear();
 	push();
 	sync();
 	unsubscribe = subscribe();
-	unbindKeys = initWarpKeys();
+	unfollow = warpStore().subscribe((s, prev) => {
+		if (s.warpActive !== prev.warpActive) api.develop.setCanvasTool(s.warpActive ? WARP_TOOL : null);
+	});
 	api.registerKeybinding({
 		id: TOGGLE_ACTION,
 		label: "Image Warp",
@@ -1113,12 +1113,6 @@ function activate(api) {
 		handler: () => {
 			if (inDevelop(api)) warpStore().getState().toggleWarp();
 		}
-	});
-	api.registerSlot({
-		id: `${ID}.overlay`,
-		slot: "develop-canvas-overlay",
-		component: WarpOverlay,
-		order: 40
 	});
 	api.registerPanel({
 		id: `${ID}.panel`,
@@ -1138,11 +1132,14 @@ function activate(api) {
 function deactivate() {
 	unsubscribe?.();
 	unsubscribe = null;
-	unbindKeys?.();
-	unbindKeys = null;
 	try {
+		warpStore().getState().setWarpActive(false);
+		unfollow?.();
+		unfollow = null;
 		const api$1 = api();
-		api$1.setStageTexture(STAGE_ID, FIELD_KEY, null);
+		api$1.develop.setCanvasTool(null);
+		release();
+		api$1.setStageTextureProvider(STAGE_ID, FIELD_KEY, null);
 		api$1.unregisterProcessingStage(STAGE_ID);
 	} catch {}
 }

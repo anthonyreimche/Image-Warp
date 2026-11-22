@@ -29,12 +29,14 @@ function fakeStore(init) {
 }
 
 function fakeApi() {
-  const registered = { keys: [], panels: [], slots: [], tools: [] };
+  const registered = { keys: [], panels: [], slots: [], tools: [], providers: {} };
   const api = {
     react: {},
     registerProcessingStage() {},
     unregisterProcessingStage() {},
     setStageTexture() {},
+    setStageTextureProvider: (stageId, key, provide) => void (registered.providers[`${stageId}.${key}`] = provide),
+    dropStageTextureVariants() {},
     registerKeybinding: (c) => void registered.keys.push(c),
     registerSlot: (c) => void registered.slots.push(c),
     registerPanel: (c) => void registered.panels.push(c),
@@ -68,6 +70,16 @@ test("registers the panel and shortcut, with no overlay slot of its own", () => 
   assert.deepEqual(registered.panels.map((p) => p.id), ["com.safelight.image-warp.panel"]);
   assert.deepEqual(registered.keys.map((k) => k.defaultCombo), ["Shift+W"]);
   assert.deepEqual(registered.slots, []);
+});
+
+// A thumbnail or an export of a photo that isn't open draws that photo's own
+// field, which Safelight asks for (SafeLight #278).
+test("makes each photo's field on demand, and stops when deactivated", () => {
+  const { api, registered } = fakeApi();
+  activate(api);
+  assert.equal(typeof registered.providers["com.safelight.image-warp.warp.warpField"], "function");
+  deactivate();
+  assert.equal(registered.providers["com.safelight.image-warp.warp.warpField"], null);
 });
 
 test("holds the canvas tool while the warp is armed and lets it go when off", () => {
