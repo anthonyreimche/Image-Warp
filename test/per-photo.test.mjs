@@ -88,8 +88,8 @@ test("a photo that isn't open draws its own warp, or none", async () => {
   assert.equal(await fieldFor("D"), null);
 });
 
-test("declares its field a per-photo texture, which needs Safelight 3.2.7", () => {
+test("declares its field a per-photo texture, which needs Safelight 3.2.8", () => {
   assert.equal(buildStage().textures?.[0].perPhoto, true);
   const manifest = JSON.parse(readFileSync(new URL("../safelight.json", import.meta.url), "utf8"));
-  assert.equal(manifest.minAppVersion, "3.2.7");
+  assert.equal(manifest.minAppVersion, "3.2.8");
 });

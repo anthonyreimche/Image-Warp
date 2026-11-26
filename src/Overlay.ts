@@ -1,10 +1,10 @@
 // The interactive layer: the canvas tool held while the warp is armed
 // (WARP_TOOL), so crop, masks and heal never take the canvas at the same time.
 // It covers the whole canvas, captures pointer events, maps them to source-UV via api.develop's overlay helpers
-// (getBoundingClientRect — never offsetX/Y, which break under Windows display
-// scaling), and stamps the active tool into the displacement field on a rAF loop
-// so a held or dragged brush flows smoothly. A custom brush ring tracks the
-// cursor; the native cursor is hidden while armed.
+// (api.develop.framePoint), and stamps the active tool into the displacement field on a rAF loop
+// so a held or dragged brush flows smoothly. The official brush ring tracks
+// the cursor, over the crosshair. Ctrl, Cmd or Space held hands the pointer to
+// the canvas's pan and zoom: core does that for a zoomable tool.
 //
 // Inline styles + CSS variables (no Tailwind in runtime extensions).
 
@@ -16,39 +16,13 @@ import { ENABLED_PARAM, FIELD_REV_PARAM, FIELD_SIZE } from "./warp-stage";
 import * as field from "./field";
 import { commit } from "./persistence";
 
-// Pointer position in the overlay's layout pixels, the space toImage and the
-// rings use: Preferences ▸ Interface scale zooms <body>, and under CSS zoom
-// clientX and getBoundingClientRect() are in zoomed visual pixels.
-export function frameLocalPoint(
-  el: Element | null,
-  clientX: number,
-  clientY: number,
-): { lx: number; ly: number } {
-  const r = el ? el.getBoundingClientRect() : { left: 0, top: 0 };
-  const z = api().stores.useSettings?.getState().uiScale || 1;
-  return { lx: (clientX - r.left) / z, ly: (clientY - r.top) / z };
-}
-
 export function WarpOverlay() {
   const react = R();
   const store = warpStore();
   const warpActive: boolean = store((s) => s.warpActive);
-  // Selected so the rings re-render when size/hardness change via keys or
-  // sliders (not just on cursor move), and to drive the centred preview.
   const size: number = store((s) => s.size);
-  const hardness: number = store((s) => s.hardness);
+  const feather: number = store((s) => s.feather);
   const previewing: boolean = store((s) => s.previewing);
-
-  // While a pan/zoom gesture key (Ctrl/⌘ or Space) is held, the overlay turns
-  // click-through so the pointer drives the canvas pan/zoom underneath instead of
-  // painting — mirroring the built-in mask/heal overlay (see ViewportImage). The
-  // ref tracks the live value for pointer handlers; the state drives re-render.
-  const [gesture, setGesture] = react.useState(false);
-  const gestureRef = react.useRef(false);
-  const setGestureState = (v: boolean) => {
-    gestureRef.current = v;
-    setGesture(v);
-  };
 
   const dev = api().stores.useDevelopStore;
   const photoId: string | null = dev((s) => s.photoId);
@@ -57,62 +31,22 @@ export function WarpOverlay() {
   const fieldRev = dev((s: { paramBag: Record<string, unknown> }) => s.paramBag[FIELD_REV_PARAM]);
 
   const ov = api().develop.useDevelopOverlay();
-  const { rect, imageRect, nonce, toImage, radiusToScreen } = ov;
+  const { rect, imageRect, nonce, toImage } = ov;
 
   const rootRef = react.useRef(null);
-  const ringRef = react.useRef(null);
-  const innerRingRef = react.useRef(null);
+  const [pointer, setPointer] = react.useState(null);
   const freezeRef = react.useRef(null);
   const pressed = react.useRef(false);
   const raf = react.useRef(0);
   const cur = react.useRef({ lx: 0, ly: 0, u: 0, v: 0, inside: false });
   const lastDab = react.useRef({ u: 0, v: 0 });
   const lastTime = react.useRef(0);
-  const shown = react.useRef(false);
 
   const visible = warpActive && !!rect && !!photoId && !!toImage;
 
-  // Hide the native cursor while armed so only our brush ring shows. Released
-  // while a pan/zoom gesture is held so ViewportImage's zoom/pan cursor surfaces.
   react.useEffect(() => {
-    if (!visible || gesture) return;
-    const release = api().develop.setCanvasCursor("none", { priority: 20 });
-    return release;
-  }, [visible, gesture]);
-
-  // Track the pan/zoom gesture keys while armed. Mirrors ViewportImage: Ctrl/⌘ or
-  // Space held → click-through (canvas pans/zooms); released → back to painting.
-  react.useEffect(() => {
-    if (!visible) {
-      setGestureState(false);
-      return;
-    }
-    const isEditable = (t: EventTarget | null): boolean => {
-      const el = t as HTMLElement | null;
-      if (!el || !el.tagName) return false;
-      const tag = el.tagName;
-      return (
-        tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true
-      );
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (isEditable(e.target)) return;
-      if (e.code === "Space" || e.ctrlKey || e.metaKey) setGestureState(true);
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space" || !(e.ctrlKey || e.metaKey)) setGestureState(false);
-    };
-    const onBlur = () => setGestureState(false);
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("keyup", onKeyUp, true);
-    window.addEventListener("blur", onBlur);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("keyup", onKeyUp, true);
-      window.removeEventListener("blur", onBlur);
-      setGestureState(false);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!visible) return;
+    return api().develop.setCanvasCursor("crosshair", { priority: 20 });
   }, [visible]);
 
   // Tear down any in-flight stroke if we become hidden mid-drag.
@@ -158,46 +92,10 @@ export function WarpOverlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, nonce, fieldRev]);
 
-  const updateRing = (lx: number, ly: number, show: boolean) => {
-    shown.current = show;
-    const s = store.getState();
-    const px = radiusToScreen ? radiusToScreen(s.size) : 20;
-    const place = (el: HTMLDivElement | null, d: number, vis: boolean) => {
-      if (!el) return;
-      el.style.display = vis ? "block" : "none";
-      el.style.width = `${d}px`;
-      el.style.height = `${d}px`;
-      el.style.left = `${lx}px`;
-      el.style.top = `${ly}px`;
-    };
-    place(ringRef.current as HTMLDivElement | null, px * 2, show);
-    // Dashed inner ring marks the hard core (hardness), matching the preview.
-    place(innerRingRef.current as HTMLDivElement | null, px * 2 * s.hardness, show && s.hardness < 0.99);
+  const localFromEvent = (e: PointerEvent): { lx: number; ly: number } => {
+    const p = api().develop.framePoint(rootRef.current as HTMLElement, e.clientX, e.clientY);
+    return { lx: p.x, ly: p.y };
   };
-
-  // Resize the cursor ring the instant the brush size/hardness change via
-  // keys/sliders, not only on the next pointer move.
-  react.useEffect(() => {
-    if (shown.current) updateRing(cur.current.lx, cur.current.ly, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size, hardness]);
-
-  // Entering pan/zoom mode: abandon any in-flight stroke (committing what's there)
-  // and hide the brush ring so the overlay visibly hands off to the canvas.
-  react.useEffect(() => {
-    if (!gesture) return;
-    if (pressed.current) {
-      pressed.current = false;
-      if (raf.current) cancelAnimationFrame(raf.current);
-      raf.current = 0;
-      if (!field.isEmpty()) void commit("Warp");
-    }
-    updateRing(0, 0, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gesture]);
-
-  const localFromEvent = (e: PointerEvent): { lx: number; ly: number } =>
-    frameLocalPoint(rootRef.current as HTMLElement | null, e.clientX, e.clientY);
 
   const sampleAt = (lx: number, ly: number) => {
     const p = toImage ? toImage(lx, ly) : { x: -1, y: -1 };
@@ -233,7 +131,7 @@ export function WarpOverlay() {
           cv: last.v + ddv * t,
           rv,
           aspect,
-          hardness: s.hardness,
+          hardness: 1 - s.feather,
           density: s.density,
           pressure: s.pressure,
           flow: flowPer,
@@ -249,7 +147,7 @@ export function WarpOverlay() {
   };
 
   const onDown = (e: PointerEvent & { currentTarget: HTMLElement }) => {
-    if (!visible || gestureRef.current) return;
+    if (!visible) return;
     const { lx, ly } = localFromEvent(e);
     sampleAt(lx, ly);
     if (!cur.current.inside) return;
@@ -267,16 +165,16 @@ export function WarpOverlay() {
     pressed.current = true;
     lastDab.current = { u: cur.current.u, v: cur.current.v };
     lastTime.current = performance.now();
-    updateRing(lx, ly, true);
+    setPointer({ x: lx, y: ly });
     if (raf.current) cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(frame);
   };
 
   const onMove = (e: PointerEvent) => {
-    if (!visible || gestureRef.current) return;
+    if (!visible) return;
     const { lx, ly } = localFromEvent(e);
     sampleAt(lx, ly);
-    updateRing(lx, ly, true);
+    setPointer({ x: lx, y: ly });
   };
 
   const onUp = (e: PointerEvent & { currentTarget: HTMLElement }) => {
@@ -293,7 +191,7 @@ export function WarpOverlay() {
   };
 
   const onLeave = () => {
-    if (!pressed.current) updateRing(0, 0, false);
+    if (!pressed.current) setPointer(null);
   };
 
   if (!visible) return null;
@@ -309,11 +207,7 @@ export function WarpOverlay() {
       style: {
         position: "absolute",
         inset: 0,
-        // Click-through while a pan/zoom gesture key is held so the pointer
-        // reaches the canvas pan/zoom layer underneath instead of painting.
-        pointerEvents: gesture ? "none" : "auto",
         touchAction: "none",
-        cursor: gesture ? "default" : "none",
         overflow: "hidden",
       },
     },
@@ -330,63 +224,7 @@ export function WarpOverlay() {
           },
         })
       : null,
-    h("div", {
-      ref: ringRef,
-      style: {
-        position: "absolute",
-        display: "none",
-        transform: "translate(-50%, -50%)",
-        borderRadius: "50%",
-        border: "1.5px solid rgba(255,255,255,0.9)",
-        boxShadow: "0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35)",
-        pointerEvents: "none",
-      },
-    }),
-    h("div", {
-      ref: innerRingRef,
-      style: {
-        position: "absolute",
-        display: "none",
-        transform: "translate(-50%, -50%)",
-        borderRadius: "50%",
-        border: "1.5px dashed rgba(255,255,255,0.9)",
-        boxShadow: "0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35)",
-        pointerEvents: "none",
-      },
-    }),
-    previewing && rect ? centerPreview(rect, radiusToScreen ? radiusToScreen(size) : 20, hardness) : null,
-  );
-}
-
-// Centred reference ring shown while a brush slider is dragged: outer = size,
-// dashed inner = the hard core (hardness).
-function centerPreview(
-  rect: { x: number; y: number; w: number; h: number },
-  px: number,
-  hardness: number,
-): unknown {
-  const cx = rect.x + rect.w / 2;
-  const cy = rect.y + rect.h / 2;
-  const ring = (d: number, dashed: boolean) =>
-    h("div", {
-      style: {
-        position: "absolute",
-        left: `${cx}px`,
-        top: `${cy}px`,
-        width: `${d}px`,
-        height: `${d}px`,
-        transform: "translate(-50%, -50%)",
-        borderRadius: "50%",
-        border: `1.5px ${dashed ? "dashed" : "solid"} rgba(255,255,255,0.9)`,
-        boxShadow: "0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35)",
-        pointerEvents: "none",
-      },
-    });
-  return h(
-    "div",
-    { style: { position: "absolute", inset: 0, pointerEvents: "none" } },
-    ring(px * 2, false),
-    hardness < 0.99 ? ring(px * 2 * hardness, true) : null,
+    h(api().develop.BrushCursor, { at: previewing ? "centre" : pointer, size, feather }),
   );
 }
 

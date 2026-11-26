@@ -28,14 +28,6 @@ const TOGGLE_ACTION = `${ID}.toggle`;
 let unsubscribe: (() => void) | null = null;
 let unfollow: (() => void) | null = null;
 
-function inDevelop(api: SafelightAPI): boolean {
-  const detached = new URLSearchParams(window.location.search).get("detached");
-  const active =
-    api.stores.useUIStore.getState().activeModule === "develop" ||
-    detached === "develop";
-  return active && !!api.stores.useDevelopStore.getState().photoId;
-}
-
 export function activate(api: SafelightAPI): void {
   initRuntime(api);
   initStore();
@@ -66,7 +58,7 @@ export function activate(api: SafelightAPI): void {
     category: "Develop",
     defaultCombo: "Shift+W",
     handler: () => {
-      if (inDevelop(api)) warpStore().getState().toggleWarp();
+      if (api.navigation.current() === "develop" && api.stores.useDevelopStore.getState().photoId) warpStore().getState().toggleWarp();
     },
   });
 
@@ -75,6 +67,7 @@ export function activate(api: SafelightAPI): void {
     title: "Warp",
     component: WarpPanel,
     defaultDock: { module: "develop", direction: "right", order: 7, width: 250 },
+    modules: ["develop"],
     onReset: () => {
       void persistence.clearWarp();
     },

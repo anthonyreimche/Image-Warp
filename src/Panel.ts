@@ -5,7 +5,7 @@
 // kit) but uses kit Buttons for the cells.
 
 import { h, R, api } from "./runtime";
-import { warpStore, type WarpTool } from "./store";
+import { WARP_STRENGTH, warpStore, type WarpTool } from "./store";
 import { toolIcon } from "./icons";
 import { clearWarp } from "./persistence";
 
@@ -28,20 +28,8 @@ export function WarpPanel() {
 	const store = warpStore();
 	const Slider = a.components.Slider;
 
-	if (!a.ui)
-		return h(
-			"div",
-			{
-				style: {
-					padding: "10px",
-					fontSize: "11px",
-					color: "var(--color-text-muted)",
-				},
-			},
-			"Update Safelight to use this panel.",
-		);
-
-	const { Button } = a.ui;
+	const { Button, tokens } = a.ui;
+	const brush = a.develop.brush.defaults;
 
 	const warpActive: boolean = store((s) => s.warpActive);
 	const tool: WarpTool = store((s) => s.tool);
@@ -49,7 +37,7 @@ export function WarpPanel() {
 	const density: number = store((s) => s.density);
 	const pressure: number = store((s) => s.pressure);
 	const rate: number = store((s) => s.rate);
-	const hardness: number = store((s) => s.hardness);
+	const feather: number = store((s) => s.feather);
 	const held = a.develop.useCanvasToolHeld();
 
 	// Another tool took the canvas (crop, masks, heal): the warp finishes.
@@ -124,20 +112,19 @@ export function WarpPanel() {
 		label: string,
 		value: number,
 		min: number,
-		max: number,
 		dflt: number,
 		onChange: (v: number) => void,
 	) =>
 		react.createElement(Slider, {
 			label,
-			value,
+			value: Math.round(value * 100),
 			min,
-			max,
-			step: 0.01,
-			defaultValue: dflt,
+			max: label === "Size" ? 50 : 100,
+			step: 1,
+			defaultValue: Math.round(dflt * 100),
 			// While dragging, show the centred reference ring (cleared on release).
 			onChange: (v: number) => {
-				onChange(v);
+				onChange(v / 100);
 				store.getState().setPreviewing(true);
 			},
 			onCommit: () => store.getState().setPreviewing(false),
@@ -157,18 +144,7 @@ export function WarpPanel() {
 		h(
 			"div",
 			{
-				style: {
-					fontSize: "10.5px",
-					color: "var(--color-accent)",
-					lineHeight: 1.4,
-				},
-			},
-			"Drag on the image to warp.",
-		),
-
-		h(
-			"div",
-			{
+				title: "Drag on the image to warp",
 				style: {
 					display: "grid",
 					gridTemplateColumns: "repeat(2, 1fr)",
@@ -181,22 +157,16 @@ export function WarpPanel() {
 		h("div", {
 			style: {
 				height: "1px",
-				background: "var(--color-border-subtle)",
+				background: tokens.borderSubtle,
 				margin: "2px 0",
 			},
 		}),
 
-		slider("Size", size, 0.02, 0.6, 0.14, (v) => store.getState().setSize(v)),
-		slider("Density", density, 0, 1, 0.5, (v) =>
-			store.getState().setDensity(v),
-		),
-		slider("Pressure", pressure, 0, 1, 1, (v) =>
-			store.getState().setPressure(v),
-		),
-		slider("Rate", rate, 0, 1, 0.5, (v) => store.getState().setRate(v)),
-		slider("Hardness", hardness, 0, 1, 0.5, (v) =>
-			store.getState().setHardness(v),
-		),
+		slider("Size", size, 1, brush.size, (v) => store.getState().setSize(v)),
+		slider("Feather", feather, 0, brush.feather, (v) => store.getState().setFeather(v)),
+		slider("Density", density, 1, WARP_STRENGTH, (v) => store.getState().setDensity(v)),
+		slider("Pressure", pressure, 0, 1, (v) => store.getState().setPressure(v)),
+		slider("Rate", rate, 1, WARP_STRENGTH, (v) => store.getState().setRate(v)),
 
 		h(
 			"div",

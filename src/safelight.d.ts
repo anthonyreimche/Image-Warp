@@ -37,11 +37,6 @@ export interface UIStoreState {
   activeModule: "library" | "develop";
 }
 
-export interface SettingsState {
-  /** Preferences ▸ Interface scale, applied as CSS zoom on <body>. */
-  uiScale: number;
-}
-
 // ── Develop-canvas overlay geometry ──────────────────────────────────────────
 
 export interface OverlayRect {
@@ -94,6 +89,8 @@ export interface PanelContribution {
     width?: number;
     height?: number;
   };
+  /** The modules the panel may be docked in; omitted, every module (Safelight 3.2.8). */
+  modules?: readonly string[];
   onReset?: () => void;
 }
 
@@ -158,6 +155,32 @@ export interface ProcessingStageContribution {
   textures?: TextureRequirement[];
 }
 
+// ── Brush ────────────────────────────────────────────────────────────────────
+
+export interface BrushSettings {
+    size: number;
+    feather: number;
+    opacity: number;
+    flow: number;
+}
+
+export type BrushSetting = keyof BrushSettings;
+
+export interface BrushCursorProps {
+    /** The pointer in the overlay's layout px (api.develop.framePoint), or
+     *  "centre" for the reference ring a size slider shows; null draws nothing. */
+    at: {
+        x: number;
+        y: number;
+    } | "centre" | null;
+    /** The brush's radius, a share of the photo's height. */
+    size: number;
+    /** 0 to 1: how much of the radius fades. */
+    feather: number;
+    /** An erasing (subtracting) brush, drawn red and dashed. */
+    erase?: boolean;
+}
+
 // ── API ──────────────────────────────────────────────────────────────────────
 
 // Shared core UI kit components are opaque React components; this file vendors
@@ -204,7 +227,7 @@ export interface SafelightAPI {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   components: Record<string, any>;
-  ui?: {
+  ui: {
     Button: ComponentType;
     Select: ComponentType;
     TextInput: ComponentType;
@@ -220,14 +243,19 @@ export interface SafelightAPI {
     Row: ComponentType;
     Stack: ComponentType;
     tokens: Record<string, string>;
-    alertDialog?(options: { title: string; message: string }): Promise<void>;
+    alertDialog(options: { title: string; message: string }): Promise<void>;
+  };
+  navigation: {
+    /** The module this window shows: a popped-out window's own module, else
+     *  the main window's tab. Ask it before acting on a Develop shortcut,
+     *  `current() === "develop"`, rather than reading the URL. Needs
+     *  Safelight 3.2.7. */
+    current(): string;
   };
   stores: {
     create<T>(initializer: StateCreator<T>): StoreApi<T>;
     useDevelopStore: StoreApi<DevelopStoreState>;
     useUIStore: StoreApi<UIStoreState>;
-    /** Missing on apps before the Interface scale setting. */
-    useSettings?: StoreApi<SettingsState>;
     [key: string]: unknown;
   };
   develop: {
@@ -246,6 +274,33 @@ export interface SafelightAPI {
     setCanvasTool(tool: CanvasTool | null): void;
     /** React hook: whether this extension holds the canvas tool. */
     useCanvasToolHeld(): boolean;
+    /** The official brush: its starting settings (size is a radius, a share of
+     *  the photo's height; feather, opacity and flow run 0 to 1) and `actions`,
+     *  the rebindable brush shortcuts' keybinding ids, which core hands only to
+     *  the held canvas tool: answer CanvasTool.onAction and wants with `step`,
+     *  passing the settings the tool has. It returns the setting a shortcut
+     *  changes and its new value, held to its range, or null for one the tool
+     *  doesn't have, which core then leaves alone. Needs Safelight 3.2.7. */
+    brush: {
+        defaults: Readonly<BrushSettings>;
+        actions: readonly string[];
+        step(action: string, brush: Partial<BrushSettings>): {
+            key: BrushSetting;
+            value: number;
+        } | null;
+    };
+    /** The official brush ring, for a canvas tool's overlay (a React component
+     *  taking BrushCursorProps). It draws around the crosshair cursor. Needs
+     *  Safelight 3.2.7. */
+    BrushCursor: ComponentType;
+    /** The pointer in `el`'s layout px: the space an overlay's `rect`, the
+     *  mapping helpers and CSS left/top use. Interface scale zooms the page,
+     *  so clientX minus the element's left is off by the zoom. Needs Safelight
+     *  3.2.7. */
+    framePoint(el: Element, clientX: number, clientY: number): {
+        x: number;
+        y: number;
+    };
   };
 }
 

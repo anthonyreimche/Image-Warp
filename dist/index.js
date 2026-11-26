@@ -22,15 +22,17 @@ function h(type, props, ...children) {
 //#endregion
 //#region src/store.ts
 let _store = null;
+/** Where Density and Rate start: how hard and how fast a stroke warps. */
+const WARP_STRENGTH = .5;
 function initStore() {
 	_store = api().stores.create((set) => ({
 		warpActive: false,
 		tool: "push",
-		size: .14,
+		size: api().develop.brush.defaults.size,
 		pressure: 1,
-		rate: .5,
-		density: .5,
-		hardness: .5,
+		rate: WARP_STRENGTH,
+		density: WARP_STRENGTH,
+		feather: api().develop.brush.defaults.feather,
 		previewing: false,
 		setWarpActive: (warpActive) => set(warpActive ? { warpActive } : {
 			warpActive,
@@ -41,11 +43,11 @@ function initStore() {
 			previewing: false
 		} : { warpActive: true }),
 		setTool: (tool) => set({ tool }),
-		setSize: (size) => set({ size: clamp(size, .02, .6) }),
+		setSize: (size) => set({ size: clamp(size, .01, .5) }),
 		setPressure: (pressure) => set({ pressure: clamp(pressure, 0, 1) }),
-		setRate: (rate) => set({ rate: clamp(rate, 0, 1) }),
-		setDensity: (density) => set({ density: clamp(density, 0, 1) }),
-		setHardness: (hardness) => set({ hardness: clamp(hardness, 0, 1) }),
+		setRate: (rate) => set({ rate: clamp(rate, .01, 1) }),
+		setDensity: (density) => set({ density: clamp(density, .01, 1) }),
+		setFeather: (feather) => set({ feather: clamp(feather, 0, 1) }),
 		setPreviewing: (previewing) => set({ previewing })
 	}));
 	return _store;
@@ -485,7 +487,7 @@ function sync() {
 	}).catch((err) => {
 		console.error("[image-warp] couldn't read the photo's warp", err);
 		if (!current()) return;
-		api().ui?.alertDialog?.({
+		api().ui.alertDialog({
 			title: "Image Warp",
 			message: "Couldn't read the warp saved with this photo, so it's showing without it. A new warp stroke replaces the saved one."
 		});
@@ -518,86 +520,39 @@ function subscribe() {
 }
 //#endregion
 //#region src/keys.ts
-const STEPS = {
-	"brush.smaller": {
-		setting: "size",
-		delta: -.02
-	},
-	"brush.larger": {
-		setting: "size",
-		delta: .02
-	},
-	"brush.featherDown": {
-		setting: "hardness",
-		delta: .05
-	},
-	"brush.featherUp": {
-		setting: "hardness",
-		delta: -.05
-	},
-	"brush.opacityDown": {
-		setting: "density",
-		delta: -.1
-	},
-	"brush.opacityUp": {
-		setting: "density",
-		delta: .1
-	},
-	"brush.flowDown": {
-		setting: "rate",
-		delta: -.1
-	},
-	"brush.flowUp": {
-		setting: "rate",
-		delta: .1
-	}
-};
 /** Steps the warp brush by `action` (one of Develop's brush shortcuts) when
-*  `run`; whether it is one. The store's setters clamp. */
+*  `run`; whether it is one. The store's setters hold each setting to range. */
 function brushAction(action, run) {
-	const s = STEPS[action];
-	if (!s) return false;
-	if (!run) return true;
 	const st = warpStore().getState();
-	if (s.setting === "size") st.setSize(st.size + s.delta);
-	else if (s.setting === "hardness") st.setHardness(st.hardness + s.delta);
-	else if (s.setting === "density") st.setDensity(st.density + s.delta);
-	else st.setRate(st.rate + s.delta);
+	const step = api().develop.brush.step(action, {
+		size: st.size,
+		feather: st.feather,
+		opacity: st.density,
+		flow: st.rate
+	});
+	if (!step) return false;
+	if (!run) return true;
+	if (step.key === "size") st.setSize(step.value);
+	else if (step.key === "feather") st.setFeather(step.value);
+	else if (step.key === "opacity") st.setDensity(step.value);
+	else st.setRate(step.value);
 	return true;
 }
 //#endregion
 //#region src/Overlay.ts
-function frameLocalPoint(el, clientX, clientY) {
-	const r = el ? el.getBoundingClientRect() : {
-		left: 0,
-		top: 0
-	};
-	const z = api().stores.useSettings?.getState().uiScale || 1;
-	return {
-		lx: (clientX - r.left) / z,
-		ly: (clientY - r.top) / z
-	};
-}
 function WarpOverlay() {
 	const react = R();
 	const store = warpStore();
 	const warpActive = store((s) => s.warpActive);
 	const size = store((s) => s.size);
-	const hardness = store((s) => s.hardness);
+	const feather = store((s) => s.feather);
 	const previewing = store((s) => s.previewing);
-	const [gesture, setGesture] = react.useState(false);
-	const gestureRef = react.useRef(false);
-	const setGestureState = (v) => {
-		gestureRef.current = v;
-		setGesture(v);
-	};
 	const dev = api().stores.useDevelopStore;
 	const photoId = dev((s) => s.photoId);
 	const fieldRev = dev((s) => s.paramBag[FIELD_REV_PARAM]);
-	const { rect, imageRect, nonce, toImage, radiusToScreen } = api().develop.useDevelopOverlay();
+	const { rect, imageRect, nonce, toImage } = api().develop.useDevelopOverlay();
 	const rootRef = react.useRef(null);
-	const ringRef = react.useRef(null);
-	const innerRingRef = react.useRef(null);
+	const [pointer, setPointer] = react.useState(null);
 	const freezeRef = react.useRef(null);
 	const pressed = react.useRef(false);
 	const raf = react.useRef(0);
@@ -613,40 +568,10 @@ function WarpOverlay() {
 		v: 0
 	});
 	const lastTime = react.useRef(0);
-	const shown = react.useRef(false);
 	const visible = warpActive && !!rect && !!photoId && !!toImage;
 	react.useEffect(() => {
-		if (!visible || gesture) return;
-		return api().develop.setCanvasCursor("none", { priority: 20 });
-	}, [visible, gesture]);
-	react.useEffect(() => {
-		if (!visible) {
-			setGestureState(false);
-			return;
-		}
-		const isEditable = (t) => {
-			const el = t;
-			if (!el || !el.tagName) return false;
-			const tag = el.tagName;
-			return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
-		};
-		const onKeyDown = (e) => {
-			if (isEditable(e.target)) return;
-			if (e.code === "Space" || e.ctrlKey || e.metaKey) setGestureState(true);
-		};
-		const onKeyUp = (e) => {
-			if (e.code === "Space" || !(e.ctrlKey || e.metaKey)) setGestureState(false);
-		};
-		const onBlur = () => setGestureState(false);
-		window.addEventListener("keydown", onKeyDown, true);
-		window.addEventListener("keyup", onKeyUp, true);
-		window.addEventListener("blur", onBlur);
-		return () => {
-			window.removeEventListener("keydown", onKeyDown, true);
-			window.removeEventListener("keyup", onKeyUp, true);
-			window.removeEventListener("blur", onBlur);
-			setGestureState(false);
-		};
+		if (!visible) return;
+		return api().develop.setCanvasCursor("crosshair", { priority: 20 });
 	}, [visible]);
 	react.useEffect(() => {
 		if (visible) return;
@@ -686,35 +611,13 @@ function WarpOverlay() {
 		nonce,
 		fieldRev
 	]);
-	const updateRing = (lx, ly, show) => {
-		shown.current = show;
-		const s = store.getState();
-		const px = radiusToScreen ? radiusToScreen(s.size) : 20;
-		const place = (el, d, vis) => {
-			if (!el) return;
-			el.style.display = vis ? "block" : "none";
-			el.style.width = `${d}px`;
-			el.style.height = `${d}px`;
-			el.style.left = `${lx}px`;
-			el.style.top = `${ly}px`;
+	const localFromEvent = (e) => {
+		const p = api().develop.framePoint(rootRef.current, e.clientX, e.clientY);
+		return {
+			lx: p.x,
+			ly: p.y
 		};
-		place(ringRef.current, px * 2, show);
-		place(innerRingRef.current, px * 2 * s.hardness, show && s.hardness < .99);
 	};
-	react.useEffect(() => {
-		if (shown.current) updateRing(cur.current.lx, cur.current.ly, true);
-	}, [size, hardness]);
-	react.useEffect(() => {
-		if (!gesture) return;
-		if (pressed.current) {
-			pressed.current = false;
-			if (raf.current) cancelAnimationFrame(raf.current);
-			raf.current = 0;
-			if (!isEmpty()) commit("Warp");
-		}
-		updateRing(0, 0, false);
-	}, [gesture]);
-	const localFromEvent = (e) => frameLocalPoint(rootRef.current, e.clientX, e.clientY);
 	const sampleAt = (lx, ly) => {
 		const p = toImage ? toImage(lx, ly) : {
 			x: -1,
@@ -754,7 +657,7 @@ function WarpOverlay() {
 					cv: last.v + ddv * t,
 					rv,
 					aspect,
-					hardness: s.hardness,
+					hardness: 1 - s.feather,
 					density: s.density,
 					pressure: s.pressure,
 					flow: flowPer,
@@ -772,7 +675,7 @@ function WarpOverlay() {
 		raf.current = requestAnimationFrame(frame);
 	};
 	const onDown = (e) => {
-		if (!visible || gestureRef.current) return;
+		if (!visible) return;
 		const { lx, ly } = localFromEvent(e);
 		sampleAt(lx, ly);
 		if (!cur.current.inside) return;
@@ -789,15 +692,21 @@ function WarpOverlay() {
 			v: cur.current.v
 		};
 		lastTime.current = performance.now();
-		updateRing(lx, ly, true);
+		setPointer({
+			x: lx,
+			y: ly
+		});
 		if (raf.current) cancelAnimationFrame(raf.current);
 		raf.current = requestAnimationFrame(frame);
 	};
 	const onMove = (e) => {
-		if (!visible || gestureRef.current) return;
+		if (!visible) return;
 		const { lx, ly } = localFromEvent(e);
 		sampleAt(lx, ly);
-		updateRing(lx, ly, true);
+		setPointer({
+			x: lx,
+			y: ly
+		});
 	};
 	const onUp = (e) => {
 		if (!pressed.current) return;
@@ -810,7 +719,7 @@ function WarpOverlay() {
 		if (!isEmpty()) commit("Warp");
 	};
 	const onLeave = () => {
-		if (!pressed.current) updateRing(0, 0, false);
+		if (!pressed.current) setPointer(null);
 	};
 	if (!visible) return null;
 	return h("div", {
@@ -822,9 +731,7 @@ function WarpOverlay() {
 		style: {
 			position: "absolute",
 			inset: 0,
-			pointerEvents: gesture ? "none" : "auto",
 			touchAction: "none",
-			cursor: gesture ? "default" : "none",
 			overflow: "hidden"
 		}
 	}, imageRect ? h("canvas", {
@@ -837,50 +744,11 @@ function WarpOverlay() {
 			height: `${imageRect.h}px`,
 			pointerEvents: "none"
 		}
-	}) : null, h("div", {
-		ref: ringRef,
-		style: {
-			position: "absolute",
-			display: "none",
-			transform: "translate(-50%, -50%)",
-			borderRadius: "50%",
-			border: "1.5px solid rgba(255,255,255,0.9)",
-			boxShadow: "0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35)",
-			pointerEvents: "none"
-		}
-	}), h("div", {
-		ref: innerRingRef,
-		style: {
-			position: "absolute",
-			display: "none",
-			transform: "translate(-50%, -50%)",
-			borderRadius: "50%",
-			border: "1.5px dashed rgba(255,255,255,0.9)",
-			boxShadow: "0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35)",
-			pointerEvents: "none"
-		}
-	}), previewing && rect ? centerPreview(rect, radiusToScreen ? radiusToScreen(size) : 20, hardness) : null);
-}
-function centerPreview(rect, px, hardness) {
-	const cx = rect.x + rect.w / 2;
-	const cy = rect.y + rect.h / 2;
-	const ring = (d, dashed) => h("div", { style: {
-		position: "absolute",
-		left: `${cx}px`,
-		top: `${cy}px`,
-		width: `${d}px`,
-		height: `${d}px`,
-		transform: "translate(-50%, -50%)",
-		borderRadius: "50%",
-		border: `1.5px ${dashed ? "dashed" : "solid"} rgba(255,255,255,0.9)`,
-		boxShadow: "0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.35)",
-		pointerEvents: "none"
-	} });
-	return h("div", { style: {
-		position: "absolute",
-		inset: 0,
-		pointerEvents: "none"
-	} }, ring(px * 2, false), hardness < .99 ? ring(px * 2 * hardness, true) : null);
+	}) : null, h(api().develop.BrushCursor, {
+		at: previewing ? "centre" : pointer,
+		size,
+		feather
+	}));
 }
 /** The tool held while the warp is armed. Develop's brush shortcuts set the
 *  brush; Escape finishes the warp, as the panel's Done does. */
@@ -991,19 +859,15 @@ function WarpPanel() {
 	const a = api();
 	const store = warpStore();
 	const Slider = a.components.Slider;
-	if (!a.ui) return h("div", { style: {
-		padding: "10px",
-		fontSize: "11px",
-		color: "var(--color-text-muted)"
-	} }, "Update Safelight to use this panel.");
-	const { Button } = a.ui;
+	const { Button, tokens } = a.ui;
+	const brush = a.develop.brush.defaults;
 	const warpActive = store((s) => s.warpActive);
 	const tool = store((s) => s.tool);
 	const size = store((s) => s.size);
 	const density = store((s) => s.density);
 	const pressure = store((s) => s.pressure);
 	const rate = store((s) => s.rate);
-	const hardness = store((s) => s.hardness);
+	const feather = store((s) => s.feather);
 	const held = a.develop.useCanvasToolHeld();
 	react.useEffect(() => {
 		if (warpActive && !held) store.getState().setWarpActive(false);
@@ -1044,15 +908,15 @@ function WarpPanel() {
 			lineHeight: 1
 		} }, toolIcon(t.id, 17), h("span", null, t.label)));
 	};
-	const slider = (label, value, min, max, dflt, onChange) => react.createElement(Slider, {
+	const slider = (label, value, min, dflt, onChange) => react.createElement(Slider, {
 		label,
-		value,
+		value: Math.round(value * 100),
 		min,
-		max,
-		step: .01,
-		defaultValue: dflt,
+		max: label === "Size" ? 50 : 100,
+		step: 1,
+		defaultValue: Math.round(dflt * 100),
 		onChange: (v) => {
-			onChange(v);
+			onChange(v / 100);
 			store.getState().setPreviewing(true);
 		},
 		onCommit: () => store.getState().setPreviewing(false)
@@ -1062,19 +926,18 @@ function WarpPanel() {
 		flexDirection: "column",
 		gap: "8px",
 		padding: "8px"
-	} }, h("div", { style: {
-		fontSize: "10.5px",
-		color: "var(--color-accent)",
-		lineHeight: 1.4
-	} }, "Drag on the image to warp."), h("div", { style: {
-		display: "grid",
-		gridTemplateColumns: "repeat(2, 1fr)",
-		gap: "4px"
-	} }, ...TOOLS.map(toolButton)), h("div", { style: {
+	} }, h("div", {
+		title: "Drag on the image to warp",
+		style: {
+			display: "grid",
+			gridTemplateColumns: "repeat(2, 1fr)",
+			gap: "4px"
+		}
+	}, ...TOOLS.map(toolButton)), h("div", { style: {
 		height: "1px",
-		background: "var(--color-border-subtle)",
+		background: tokens.borderSubtle,
 		margin: "2px 0"
-	} }), slider("Size", size, .02, .6, .14, (v) => store.getState().setSize(v)), slider("Density", density, 0, 1, .5, (v) => store.getState().setDensity(v)), slider("Pressure", pressure, 0, 1, 1, (v) => store.getState().setPressure(v)), slider("Rate", rate, 0, 1, .5, (v) => store.getState().setRate(v)), slider("Hardness", hardness, 0, 1, .5, (v) => store.getState().setHardness(v)), h("div", { style: { marginTop: "4px" } }, h(Button, {
+	} }), slider("Size", size, 1, brush.size, (v) => store.getState().setSize(v)), slider("Feather", feather, 0, brush.feather, (v) => store.getState().setFeather(v)), slider("Density", density, 1, WARP_STRENGTH, (v) => store.getState().setDensity(v)), slider("Pressure", pressure, 0, 1, (v) => store.getState().setPressure(v)), slider("Rate", rate, 1, WARP_STRENGTH, (v) => store.getState().setRate(v)), h("div", { style: { marginTop: "4px" } }, h(Button, {
 		variant: "secondary",
 		full: true,
 		onClick: () => store.getState().setWarpActive(false)
@@ -1086,10 +949,6 @@ const ID = "com.safelight.image-warp";
 const TOGGLE_ACTION = `${ID}.toggle`;
 let unsubscribe = null;
 let unfollow = null;
-function inDevelop(api) {
-	const detached = new URLSearchParams(window.location.search).get("detached");
-	return (api.stores.useUIStore.getState().activeModule === "develop" || detached === "develop") && !!api.stores.useDevelopStore.getState().photoId;
-}
 function activate(api) {
 	initRuntime(api);
 	initStore();
@@ -1111,7 +970,7 @@ function activate(api) {
 		category: "Develop",
 		defaultCombo: "Shift+W",
 		handler: () => {
-			if (inDevelop(api)) warpStore().getState().toggleWarp();
+			if (api.navigation.current() === "develop" && api.stores.useDevelopStore.getState().photoId) warpStore().getState().toggleWarp();
 		}
 	});
 	api.registerPanel({
@@ -1124,6 +983,7 @@ function activate(api) {
 			order: 7,
 			width: 250
 		},
+		modules: ["develop"],
 		onReset: () => {
 			clearWarp();
 		}

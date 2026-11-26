@@ -133,7 +133,7 @@ export function sync(): void {
     .catch((err: unknown) => {
       console.error("[image-warp] couldn't read the photo's warp", err);
       if (!current()) return;
-      void api().ui?.alertDialog?.({
+      void api().ui.alertDialog({
         title: "Image Warp",
         message:
           "Couldn't read the warp saved with this photo, so it's showing without it. A new warp stroke replaces the saved one.",

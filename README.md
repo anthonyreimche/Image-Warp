@@ -31,7 +31,7 @@ exactly like a built-in geometry edit. Nothing is baked.
 | Freeze / Thaw | Mask a region from (or back into) editing |
 
 **Brush** — *Size* (radius), *Density* (centre strength), *Pressure* (overall
-scale), *Rate* (flow speed for the continuous tools), *Hardness* (edge feather).
+scale), *Rate* (flow speed for the continuous tools), *Feather* (how much of the radius fades).
 
 Edits are fully **undoable** (Ctrl+Z / Ctrl+Y) and persist with the photo.
 

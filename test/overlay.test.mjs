@@ -1,30 +1,74 @@
-import { test } from "node:test";
+// The overlay's tree for the held tool, drawn without a renderer: hooks are
+// stubbed (state stays at its first value, effects don't run) and elements are
+// plain objects, enough to see what the overlay hands the official ring and
+// that it leaves pan and zoom to core.
+
+import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { initRuntime } from "../src/runtime.ts";
-import { frameLocalPoint } from "../src/Overlay.ts";
+import { initStore, warpStore } from "../src/store.ts";
+import { WarpOverlay } from "../src/Overlay.ts";
 
-function withUiScale(uiScale) {
-  initRuntime({ react: {}, stores: { useSettings: { getState: () => ({ uiScale }) } } });
+const BrushCursor = () => null;
+
+const rect = { x: 0, y: 0, w: 400, h: 300 };
+const stubReact = {
+  createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
+  useState: (v) => [v, () => {}],
+  useRef: (v) => ({ current: v }),
+  useEffect: () => {},
+};
+
+function fakeStore(init) {
+  let state;
+  const set = (partial) => void (state = { ...state, ...(typeof partial === "function" ? partial(state) : partial) });
+  state = init(set, () => state);
+  const hook = (selector) => (selector ? selector(state) : state);
+  hook.getState = () => state;
+  hook.setState = set;
+  return hook;
 }
 
-// Under Interface scale the <body> is CSS-zoomed: clientX and the bounding rect
-// are in zoomed visual pixels, while toImage and the rings take layout pixels.
-const root = { getBoundingClientRect: () => ({ left: 100, top: 50, width: 1000, height: 750 }) };
-
-test("maps the pointer into layout pixels at Interface scale 125 %", () => {
-  withUiScale(1.25);
-  const layout = { lx: 400, ly: 300 };
-  const clientX = 100 + layout.lx * 1.25;
-  const clientY = 50 + layout.ly * 1.25;
-  assert.deepEqual(frameLocalPoint(root, clientX, clientY), layout);
+beforeEach(() => {
+  initRuntime({
+    react: stubReact,
+    stores: {
+      create: fakeStore,
+      useDevelopStore: fakeStore(() => ({ photoId: "p", paramBag: {} })),
+    },
+    develop: {
+      brush: { defaults: { size: 0.08, feather: 0.5, opacity: 1, flow: 1 } },
+      BrushCursor,
+      framePoint: () => ({ x: 0, y: 0 }),
+      useDevelopOverlay: () => ({ rect, imageRect: rect, nonce: 1, toImage: (x, y) => ({ x, y }), radiusToScreen: (r) => r }),
+      setCanvasCursor: () => () => {},
+    },
+  });
+  initStore();
+  warpStore().getState().setWarpActive(true);
 });
 
-test("is the plain offset on an app without the settings store", () => {
-  initRuntime({ react: {}, stores: {} });
-  assert.deepEqual(frameLocalPoint(root, 340, 170), { lx: 240, ly: 120 });
+const find = (node, type) =>
+  node && typeof node === "object"
+    ? node.type === type
+      ? node
+      : (node.children ?? []).map((c) => find(c, type)).find(Boolean)
+    : undefined;
+
+test("draws the official ring, sized and feathered as the brush is", () => {
+  warpStore().getState().setSize(0.2);
+  warpStore().getState().setFeather(0.3);
+  const ring = find(WarpOverlay(), BrushCursor);
+  assert.deepEqual(ring.props, { at: null, size: 0.2, feather: 0.3 });
 });
 
-test("is the plain offset at Interface scale 100 %", () => {
-  withUiScale(1);
-  assert.deepEqual(frameLocalPoint(root, 340, 170), { lx: 240, ly: 120 });
+test("shows the ring at the centre while a brush slider is dragged", () => {
+  warpStore().getState().setPreviewing(true);
+  assert.equal(find(WarpOverlay(), BrushCursor).props.at, "centre");
+});
+
+test("leaves Ctrl, Cmd and Space to core", () => {
+  const style = WarpOverlay().props.style;
+  assert.equal(style.pointerEvents, undefined);
+  assert.equal(style.cursor, undefined);
 });
